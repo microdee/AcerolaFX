@@ -4,6 +4,10 @@
 #include "Includes/AcerolaFX_TempTex3.fxh"
 #include "Includes/AcerolaFX_TempTex4.fxh"
 
+#ifndef USE_LAUNCHPAD
+#define USE_LAUNCHPAD 1
+#endif
+
 uniform bool _UseFlow <
     ui_category_closed = true;
     ui_category = "Edge Tangent Flow Settings";
@@ -42,6 +46,33 @@ uniform bool _CalcDiffBeforeConvolving <
     ui_category = "Edge Tangent Flow Settings";
     ui_label = "Calculate Difference Before Smoothing";
 > = true;
+
+uniform float _VelocityInfluence <
+    ui_category_closed = true;
+    ui_category = "Edge Tangent Flow Settings";
+    ui_label = "Velocity overrides direction";
+    ui_type = "drag";
+    ui_min = 0.0f; ui_max = 100.0f;
+    ui_tooltip = "How much velocity should contribute to direction of flow";
+> = 20.0f;
+
+uniform float _VelocityThr <
+    ui_category_closed = true;
+    ui_category = "Edge Tangent Flow Settings";
+    ui_label = "Velocity threshold";
+    ui_type = "drag";
+    ui_min = 0.0f; ui_max = 1.0f;
+    ui_tooltip = "Above what velocity should it override direction";
+> = 0.005f;
+
+uniform float _VelocitySigmaCCtr <
+    ui_category_closed = true;
+    ui_category = "Edge Tangent Flow Settings";
+    ui_label = "Velocity Tangent Flow Deviation Contribution";
+    ui_type = "drag";
+    ui_min = 0.0f; ui_max = 10.0f;
+    ui_tooltip = "Add velocity length to Tangent Flow Deviation";
+> = 1.0f;
 
 uniform float _SigmaE <
     ui_category_closed = true;
@@ -357,6 +388,14 @@ uniform float _BlendStrength <
 #define AFX_HATCH_TEXTURE_HEIGHT 512
 #endif
 
+#if USE_LAUNCHPAD
+namespace Deferred 
+{
+	texture MotionVectorsTex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RG16F; };
+}
+sampler sMotionVectorTex { Texture = Deferred::MotionVectorsTex; };
+#endif
+
 sampler2D Lab { Texture = AFXTemp1::AFX_RenderTex1; MagFilter = POINT; MinFilter = POINT; MipFilter = POINT; };
 sampler2D HorizontalBlur { Texture = AFXTemp3::AFX_RenderTex3; MagFilter = POINT; MinFilter = POINT; MipFilter = POINT; };
 sampler2D DOGTFM { Texture = AFXTemp2::AFX_RenderTex2; MagFilter = POINT; MinFilter = POINT; MipFilter = POINT; };
@@ -412,14 +451,25 @@ void CS_StructureTensor(uint3 tid : SV_DISPATCHTHREADID) {
 }
 
 float4 PS_TFMHorizontalBlur(float4 position : SV_POSITION, float2 uv : TEXCOORD) : SV_TARGET {
-    int kernelRadius = max(1.0f, floor(_SigmaC * 2.45f));
+
+#if USE_LAUNCHPAD
+	float2 vel = tex2Dfetch(sMotionVectorTex, position.xy).xy;
+	float speed = saturate(length(vel) - _VelocityThr);
+#else
+	float2 vel = 0;
+	float speed = 0;
+#endif
+
+	float sigmaC = _SigmaC + speed * _VelocitySigmaCCtr;
+	
+    int kernelRadius = max(1.0f, floor(sigmaC * 2.45f));
 
     float3 col = 0;
     float kernelSum = 0.0f;
 
     for (int x = -kernelRadius; x <= kernelRadius; ++x) {
-        float3 c = tex2D(DifferenceOfGaussians, uv + float2(x, 0) * float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT)).rgb;
-        float gauss = gaussian(_SigmaC, x);
+        float3 c = tex2Dlod(DifferenceOfGaussians, float4(uv + float2(x, 0) * float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT), 0, 0)).rgb;
+        float gauss = gaussian(sigmaC, x);
 
         col += c * gauss;
         kernelSum += gauss;
@@ -429,14 +479,25 @@ float4 PS_TFMHorizontalBlur(float4 position : SV_POSITION, float2 uv : TEXCOORD)
 }
 
 float4 PS_TFMVerticalBlur(float4 position : SV_POSITION, float2 uv : TEXCOORD) : SV_TARGET {
-    int kernelRadius = max(1.0f, floor(_SigmaC * 2.45f));
+
+#if USE_LAUNCHPAD
+	float2 vel = tex2Dfetch(sMotionVectorTex, position.xy).xy;
+	float speed = saturate(length(vel) - _VelocityThr);
+#else
+	float2 vel = 0;
+	float speed = 0;
+#endif
+
+	float sigmaC = _SigmaC + speed * _VelocitySigmaCCtr;
+
+    int kernelRadius = max(1.0f, floor(sigmaC * 2.45f));
 
     float3 col = 0;
     float kernelSum = 0.0f;
 
     for (int y = -kernelRadius; y <= kernelRadius; ++y) {
-        float3 c = tex2D(HorizontalBlur, uv + float2(0, y) * float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT)).rgb;
-        float gauss = gaussian(_SigmaC, y);
+        float3 c = tex2Dlod(HorizontalBlur, float4(uv + float2(0, y) * float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT), 0, 0)).rgb;
+        float gauss = gaussian(sigmaC, y);
 
         col += c * gauss;
         kernelSum += gauss;
@@ -448,6 +509,7 @@ float4 PS_TFMVerticalBlur(float4 position : SV_POSITION, float2 uv : TEXCOORD) :
     float2 d = float2(g.x - lambda1, g.z);
     if (d.x > 0) d.x = -d.x;
 
+	d = lerp(d, vel, saturate(speed * _VelocityInfluence));
     return length(d) ? float4(normalize(d), sqrt(lambda1), 1.0f) : float4(0.0f, 1.0f, 0.0f, 1.0f);
 }
 

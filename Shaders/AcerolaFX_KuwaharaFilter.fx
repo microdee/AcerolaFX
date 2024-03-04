@@ -2,6 +2,10 @@
 #include "Includes/AcerolaFX_TempTex1.fxh"
 #include "Includes/AcerolaFX_TempTex2.fxh"
 
+#ifndef USE_LAUNCHPAD
+#define USE_LAUNCHPAD 1
+#endif
+
 uniform int _Filter <
     ui_type = "combo";
     ui_label = "Filter Type";
@@ -142,6 +146,14 @@ void Basic(in float2 uv, in float depth, out float4 output) {
 float gaussian(float sigma, float2 pos) {
     return (1.0f / (2.0f * AFX_PI * sigma * sigma)) * exp(-((pos.x * pos.x + pos.y * pos.y) / (2.0f * sigma * sigma)));
 }
+
+#if USE_LAUNCHPAD
+namespace Deferred 
+{
+	texture MotionVectorsTex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RG16F; };
+}
+sampler sMotionVectorTex { Texture = Deferred::MotionVectorsTex; };
+#endif
 
 texture2D AFX_SectorsTex { Width = 32; Height = 32; Format = R16F; };
 sampler2D Sectors { Texture = AFX_SectorsTex; };
