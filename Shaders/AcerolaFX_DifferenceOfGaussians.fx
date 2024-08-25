@@ -389,11 +389,11 @@ uniform float _BlendStrength <
 #endif
 
 #if USE_LAUNCHPAD
-namespace Deferred 
+namespace Velocity 
 {
-	texture MotionVectorsTex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RG16F; };
+	texture OldMotionVectorsTex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RG16F; };
 }
-sampler sMotionVectorTex { Texture = Deferred::MotionVectorsTex; };
+sampler sMotionVectorTex { Texture = Velocity::OldMotionVectorsTex; };
 #endif
 
 sampler2D Lab { Texture = AFXTemp1::AFX_RenderTex1; MagFilter = POINT; MinFilter = POINT; MipFilter = POINT; };

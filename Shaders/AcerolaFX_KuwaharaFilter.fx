@@ -148,11 +148,11 @@ float gaussian(float sigma, float2 pos) {
 }
 
 #if USE_LAUNCHPAD
-namespace Deferred 
+namespace Velocity 
 {
-	texture MotionVectorsTex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RG16F; };
+	texture OldMotionVectorsTex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RG16F; };
 }
-sampler sMotionVectorTex { Texture = Deferred::MotionVectorsTex; };
+sampler sMotionVectorTex { Texture = Velocity::OldMotionVectorsTex; };
 #endif
 
 texture2D AFX_SectorsTex { Width = 32; Height = 32; Format = R16F; };
