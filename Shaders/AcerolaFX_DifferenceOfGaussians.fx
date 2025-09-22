@@ -4,6 +4,19 @@
 #include "Includes/AcerolaFX_TempTex3.fxh"
 #include "Includes/AcerolaFX_TempTex4.fxh"
 
+#define RENDERER_D3D9          0x9000
+#define RENDERER_D3D10         0xA000 //>=
+#define RENDERER_D3D11         0xB000 //>=
+#define RENDERER_D3D12         0xC000 //>=
+#define RENDERER_OPENGL       0x10000 //>=
+#define RENDERER_VULKAN       0x20000 //>=
+
+#if __RENDERER__ >= RENDERER_D3D11
+ #define _COMPUTE_SUPPORTED          1
+#else 
+ #define _COMPUTE_SUPPORTED          0
+#endif
+
 #ifndef USE_LAUNCHPAD
 #define USE_LAUNCHPAD 1
 #endif
@@ -401,7 +414,10 @@ sampler2D HorizontalBlur { Texture = AFXTemp3::AFX_RenderTex3; MagFilter = POINT
 sampler2D DOGTFM { Texture = AFXTemp2::AFX_RenderTex2; MagFilter = POINT; MinFilter = POINT; MipFilter = POINT; };
 
 sampler2D DifferenceOfGaussians { Texture = AFXTemp4::AFX_RenderTex4; MagFilter = POINT; MinFilter = POINT; MipFilter = POINT; };
+
+#if _COMPUTE_SUPPORTED
 storage2D s_DifferenceOfGaussians { Texture = AFXTemp4::AFX_RenderTex4; };
+#endif
 
 texture2D AFX_HatchTex < source = "hatch.png"; > { Width = 512; Height = 512; };
 sampler2D Hatch { Texture = AFX_HatchTex; MagFilter = LINEAR; MinFilter = LINEAR; MipFilter = LINEAR; AddressU = REPEAT; AddressV = REPEAT; };
@@ -426,6 +442,7 @@ float4 PS_RGBtoLAB(float4 position : SV_POSITION, float2 uv : TEXCOORD) : SV_TAR
     return float4(Common::rgb2lab(tex2D(Common::AcerolaBuffer, uv).rgb), 1.0f);
 }
 
+#if _COMPUTE_SUPPORTED
 void CS_StructureTensor(uint3 tid : SV_DISPATCHTHREADID) {
     float2 d = float2(1, 1);
 
@@ -449,6 +466,31 @@ void CS_StructureTensor(uint3 tid : SV_DISPATCHTHREADID) {
 
     tex2Dstore(s_DifferenceOfGaussians, tid.xy, float4(dot(Sx, Sx), dot(Sy, Sy), dot(Sx, Sy), 1.0f));
 }
+#else
+float4 PS_StructureTensor(float4 position : SV_POSITION) : SV_TARGET {
+    float2 d = float2(1, 1);
+
+    float3 Sx = (
+            1.0f * tex2Dfetch(Lab, position.xy + float2(-d.x, -d.y)).rgb +
+            2.0f * tex2Dfetch(Lab, position.xy + float2(-d.x,  0.0)).rgb +
+            1.0f * tex2Dfetch(Lab, position.xy + float2(-d.x,  d.y)).rgb +
+            -1.0f * tex2Dfetch(Lab, position.xy + float2(d.x, -d.y)).rgb +
+            -2.0f * tex2Dfetch(Lab, position.xy + float2(d.x,  0.0)).rgb +
+            -1.0f * tex2Dfetch(Lab, position.xy + float2(d.x,  d.y)).rgb
+    ) / 4.0f;
+
+    float3 Sy = (
+            1.0f * tex2Dfetch(Lab, position.xy + float2(-d.x, -d.y)).rgb +
+            2.0f * tex2Dfetch(Lab, position.xy + float2( 0.0, -d.y)).rgb +
+            1.0f * tex2Dfetch(Lab, position.xy + float2( d.x, -d.y)).rgb +
+            -1.0f * tex2Dfetch(Lab, position.xy + float2(-d.x, d.y)).rgb +
+            -2.0f * tex2Dfetch(Lab, position.xy + float2( 0.0, d.y)).rgb +
+            -1.0f * tex2Dfetch(Lab, position.xy + float2( d.x, d.y)).rgb
+    ) / 4.0f;
+
+    return float4(dot(Sx, Sx), dot(Sy, Sy), dot(Sx, Sy), 1.0f);
+}
+#endif
 
 float4 PS_TFMHorizontalBlur(float4 position : SV_POSITION, float2 uv : TEXCOORD) : SV_TARGET {
 
@@ -522,13 +564,13 @@ float4 PS_HorizontalBlur(float4 position : SV_POSITION, float2 uv : TEXCOORD) : 
     float2 n = 0.0f;
     float ds = 0.0f;
     if (_UseFlow) {
-        float2 t = tex2D(DOGTFM, uv).xy;
+        float2 t = tex2Dlod(DOGTFM, float4(uv, 0, 0)).xy;
         n = float2(t.y, -t.x);
         float2 nabs = abs(n);
         ds = 1.0 / ((nabs.x > nabs.y) ? nabs.x : nabs.y);
         n *= float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT);
 
-        col = tex2D(Lab, uv).xx;
+        col = tex2Dlod(Lab, float4(uv, 0, 0)).xx;
         kernelSum = 1.0f;
 
         [loop]
@@ -551,7 +593,7 @@ float4 PS_HorizontalBlur(float4 position : SV_POSITION, float2 uv : TEXCOORD) : 
         return float4(col, (1 + _P) * (col.r * 100.0f) - _P * (col.g * 100.0f), 1.0f);
     } else { // Normal DoG Blur Pass
         for (int x = -kernelRadius; x <= kernelRadius; ++x) {
-            float c = tex2D(Lab, uv + float2(x, 0) * float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT)).r;
+            float c = tex2Dlod(Lab, float4(uv + float2(x, 0) * float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT), 0, 0)).r;
             float gauss1 = gaussian(_SigmaE, x);
             float gauss2 = gaussian(_SigmaE * _K, x);
 
@@ -587,7 +629,7 @@ float4 PS_VerticalBlur(float4 position : SV_POSITION, float2 uv : TEXCOORD) : SV
         [loop]
         for (int d = 1; d <= kernelRadius; ++d) {
             st0 += v0 * stepSize.x;
-            float3 c = tex2D(HorizontalBlur, st0).rgb;
+            float3 c = tex2Dlod(HorizontalBlur, float4(st0, 0, 0)).rgb;
             float gauss1 = gaussian(_SigmaM, d);
 
 
@@ -604,7 +646,7 @@ float4 PS_VerticalBlur(float4 position : SV_POSITION, float2 uv : TEXCOORD) : SV
                 w.y += gauss2;
             }
 
-            v0 = tex2D(DOGTFM, st0).xy * texelSize;
+            v0 = tex2Dlod(DOGTFM, float4(st0, 0, 0)).xy * texelSize;
         }
 
         float2 st1 = uv;
@@ -613,7 +655,7 @@ float4 PS_VerticalBlur(float4 position : SV_POSITION, float2 uv : TEXCOORD) : SV
         [loop]
         for (int d = 1; d <= kernelRadius; ++d) {
             st1 -= v1 * stepSize.y;
-            float3 c = tex2D(HorizontalBlur, st1).rgb;
+            float3 c = tex2Dlod(HorizontalBlur, float4(st1, 0, 0)).rgb;
             float gauss1 = gaussian(_SigmaM, d);
 
 
@@ -630,7 +672,7 @@ float4 PS_VerticalBlur(float4 position : SV_POSITION, float2 uv : TEXCOORD) : SV
                 w.y += gauss2;
             }
 
-            v1 = tex2D(DOGTFM, st1).xy * texelSize;
+            v1 = tex2Dlod(DOGTFM, float4(st1, 0, 0)).xy * texelSize;
         }
 
         G /= max(1.0f, w);
@@ -645,7 +687,7 @@ float4 PS_VerticalBlur(float4 position : SV_POSITION, float2 uv : TEXCOORD) : SV
         float2 kernelSum = 0.0f;
 
         for (int y = -kernelRadius; y <= kernelRadius; ++y) {
-            float c = tex2D(HorizontalBlur, uv + float2(0, y) * float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT)).r;
+            float c = tex2Dlod(HorizontalBlur, float4(uv + float2(0, y) * float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT), 0, 0)).r;
             float gauss1 = gaussian(_SigmaE, y);
             float gauss2 = gaussian(_SigmaE * _K, y);
 
@@ -705,13 +747,13 @@ float4 PS_AntiAlias(float4 position : SV_POSITION, float2 uv : TEXCOORD) : SV_TA
         [loop]
         for (int d = 1; d <= kernelSize; ++d) {
             st0 += v0 * stepSize.x;
-            float4 c = tex2D(DifferenceOfGaussians, st0);
+            float4 c = tex2Dlod(DifferenceOfGaussians, float4(st0, 0, 0));
             float gauss1 = gaussian(_SigmaA, d);
 
             G += gauss1 * c;
             w += gauss1;
 
-            v0 = tex2D(DOGTFM, st0).xy * texelSize;
+            v0 = tex2Dlod(DOGTFM, float4(st0, 0, 0)).xy * texelSize;
         }
 
         float2 st1 = uv;
@@ -720,13 +762,13 @@ float4 PS_AntiAlias(float4 position : SV_POSITION, float2 uv : TEXCOORD) : SV_TA
         [loop]
         for (int d = 1; d <= kernelSize; ++d) {
             st1 -= v1 * stepSize.y;
-            float4 c = tex2D(DifferenceOfGaussians, st1);
+            float4 c = tex2Dlod(DifferenceOfGaussians, float4(st1, 0, 0));
             float gauss1 = gaussian(_SigmaA, d);
 
             G += gauss1 * c;
             w += gauss1;
 
-            v1 = tex2D(DOGTFM, st1).xy * texelSize;
+            v1 = tex2Dlod(DOGTFM, float4(st1, 0, 0)).xy * texelSize;
         }
 
         return G /= max(1.0f, w);
@@ -842,14 +884,21 @@ technique AFX_DifferenceOfGaussians < ui_label = "Difference Of Gaussians"; > {
         VertexShader = PostProcessVS;
         PixelShader = PS_RGBtoLAB;
     }
-
+#if _COMPUTE_SUPPORTED
     pass {
         ComputeShader = CS_StructureTensor<8, 8>;
 
         DispatchSizeX = (BUFFER_WIDTH + 7) / 8;
         DispatchSizeY = (BUFFER_HEIGHT + 7) / 8;
     }
+#else
+    pass {
+        RenderTarget = AFXTemp4::AFX_RenderTex4;
 
+        VertexShader = PostProcessVS;
+        PixelShader = PS_StructureTensor;
+    }
+#endif
     pass {
         RenderTarget = AFXTemp3::AFX_RenderTex3;
 

@@ -1,12 +1,28 @@
 #pragma once
 
+#define RENDERER_D3D9          0x9000
+#define RENDERER_D3D10         0xA000 //>=
+#define RENDERER_D3D11         0xB000 //>=
+#define RENDERER_D3D12         0xC000 //>=
+#define RENDERER_OPENGL       0x10000 //>=
+#define RENDERER_VULKAN       0x20000 //>=
+
+#if __RENDERER__ >= RENDERER_D3D11
+ #define _COMPUTE_SUPPORTED          1
+#else 
+ #define _COMPUTE_SUPPORTED          0
+#endif
+
 #define AFX_PI 3.14159265358979323846f
 
 namespace Common {
     texture2D AcerolaBufferTex { Width = BUFFER_WIDTH; Height = BUFFER_HEIGHT; Format = RGBA16F; };
     sampler2D AcerolaBuffer { Texture = AcerolaBufferTex; MagFilter = POINT; MinFilter = POINT; MipFilter = POINT;};
     sampler2D AcerolaBufferLinear { Texture = AcerolaBufferTex; };
+    
+#if _COMPUTE_SUPPORTED
     storage2D s_AcerolaBuffer { Texture = AcerolaBufferTex; };
+#endif
 
     sampler2D AcerolaBufferMirror { Texture = AcerolaBufferTex; AddressU = MIRROR; AddressV = MIRROR; AddressW = MIRROR; MagFilter = POINT; MinFilter = POINT; MipFilter = POINT;};
     sampler2D AcerolaBufferMirrorLinear { Texture = AcerolaBufferTex; AddressU = MIRROR; AddressV = MIRROR; AddressW = MIRROR; };
